@@ -104,3 +104,17 @@ class CreatorPayoutSummary:
     creator_id: str
     eligible_order_count: int
     expected_payout: Decimal
+
+
+@dataclass(frozen=True)
+class CreatorReconciliationResult:
+    """Comparison of one creator's expected payout and completed payments."""
+
+    creator_id: str
+    expected_payout: Decimal
+    amount_paid: Decimal
+    difference: Decimal
+    status: ReconciliationStatus
+    paid_payment_count: int
+    pending_payment_count: int
+    failed_payment_count: int
