@@ -113,7 +113,8 @@ class CreatorReconciliationResult:
     creator_id: str
     expected_payout: Decimal
     amount_paid: Decimal
-    difference: Decimal
+    outstanding_balance: Decimal
+    variance: Decimal
     status: ReconciliationStatus
     paid_payment_count: int
     pending_payment_count: int

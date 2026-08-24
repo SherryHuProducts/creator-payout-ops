@@ -42,8 +42,13 @@ def reconcile_creator_payout(
     ]
     paid = _currency(sum((payment.amount_paid for payment in paid_payments), ZERO))
     expected = _currency(payout_summary.expected_payout)
-    difference = _currency(expected - paid)
+    outstanding_balance = _currency(expected - paid)
+    variance = _currency(paid - expected)
 
+    # A pending payment is intentionally not treated as completed here. The
+    # future payment execution layer must prevent initiating a second payment
+    # while an active PENDING payment exists; that safety control does not
+    # belong to reconciliation.
     if expected == paid:
         status = ReconciliationStatus.PAID
     elif expected > ZERO and paid == ZERO:
@@ -61,7 +66,8 @@ def reconcile_creator_payout(
         creator_id=payout_summary.creator_id,
         expected_payout=expected,
         amount_paid=paid,
-        difference=difference,
+        outstanding_balance=outstanding_balance,
+        variance=variance,
         status=status,
         paid_payment_count=len(paid_payments),
         pending_payment_count=sum(
