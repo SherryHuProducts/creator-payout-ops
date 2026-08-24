@@ -28,6 +28,9 @@ class PaymentStatus(str, Enum):
 
 
 class ReconciliationStatus(str, Enum):
+    ELIGIBLE = "ELIGIBLE"
+    CANCELLED = "CANCELLED"
+    REFUNDED = "REFUNDED"
     READY_TO_PAY = "READY_TO_PAY"
     PAID = "PAID"
     UNDERPAID = "UNDERPAID"
@@ -36,6 +39,7 @@ class ReconciliationStatus(str, Enum):
     MISSING_AGREEMENT = "MISSING_AGREEMENT"
     DUPLICATE_ORDER = "DUPLICATE_ORDER"
     INVALID_RECORD = "INVALID_RECORD"
+    INVALID_AGREEMENT = "INVALID_AGREEMENT"
 
 
 @dataclass(frozen=True)
@@ -76,3 +80,27 @@ class PaymentRecord:
     amount_paid: Decimal
     payment_status: PaymentStatus
     provider_reference: Optional[str]
+
+
+@dataclass(frozen=True)
+class PayoutResult:
+    """The payout engine's decision for one platform order."""
+
+    order_id: str
+    creator_id: str
+    order_date: date
+    actual_commission: Decimal
+    creator_share_rate: Optional[Decimal]
+    expected_payout: Decimal
+    status: ReconciliationStatus
+    agreement_effective_date: Optional[date]
+    reason: Optional[str]
+
+
+@dataclass(frozen=True)
+class CreatorPayoutSummary:
+    """Eligible order payouts aggregated for one creator."""
+
+    creator_id: str
+    eligible_order_count: int
+    expected_payout: Decimal
