@@ -1,0 +1,10 @@
+creator_id,creator_name,creator_share_rate,effective_date,end_date,active
+CR-A,Creator A,0.60,2025-01-01,,true
+CR-B,Creator B,0.65,2025-01-01,,true
+CR-C,Creator C,0.70,2025-01-01,,true
+CR-D,Creator D,0.55,2025-01-01,,true
+CR-E,Creator E,0.75,2025-01-01,,true
+CR-F,Creator F,0.62,2025-01-01,,true
+CR-G,Creator G,0.58,2025-01-01,,true
+CR-H,Creator H,0.50,2025-01-01,2025-06-30,false
+CR-H,Creator H,0.68,2025-07-01,,true

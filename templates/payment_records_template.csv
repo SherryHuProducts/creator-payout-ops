@@ -1,0 +1,2 @@
+payment_id,creator_id,payment_date,amount_paid,payment_status,provider_reference
+PAY-EXAMPLE-001,CR-EXAMPLE,2026-02-01,17.50,PAID,DEMO-REF-001

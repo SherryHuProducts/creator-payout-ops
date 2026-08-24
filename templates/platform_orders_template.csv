@@ -1,0 +1,2 @@
+order_id,creator_id,creator_username,order_date,gross_sales,actual_commission,refund_amount,settlement_status
+ORD-EXAMPLE-001,CR-EXAMPLE,creator_example,2026-01-15,125.00,25.00,0.00,SETTLED
