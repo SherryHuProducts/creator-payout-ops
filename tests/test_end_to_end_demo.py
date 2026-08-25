@@ -19,4 +19,5 @@ def test_demo_runs_and_confirms_payment_without_duplicates(capsys):
     assert outcome["provider_payment_count"] == 1
     assert outcome["final_reconciliation"].status is ReconciliationStatus.PAID
     assert outcome["final_reconciliation"].outstanding_balance.is_zero()
+    assert all(path.exists() for path in outcome["report_paths"].values())
     assert "End-to-End Workflow Complete" in output

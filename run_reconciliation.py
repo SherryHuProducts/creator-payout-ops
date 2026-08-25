@@ -24,6 +24,9 @@ from creator_payout_ops.payment_provider import MockPaymentProvider  # noqa: E40
 from creator_payout_ops.payment_service import PaymentService  # noqa: E402
 from creator_payout_ops.payout_engine import aggregate_creator_payouts, calculate_payouts  # noqa: E402
 from creator_payout_ops.reconciliation import reconcile_creator_payout, reconcile_payouts  # noqa: E402
+from creator_payout_ops.reports import (  # noqa: E402
+    write_exception_report, write_payout_summary, write_reconciliation_report,
+)
 from creator_payout_ops.validators import validate_all  # noqa: E402
 from creator_payout_ops.webhook_handler import WebhookHandler  # noqa: E402
 
@@ -77,6 +80,19 @@ def run_demo() -> dict[str, object]:
     print("Creator   Expected    Paid        Outstanding   Status")
     for result in initial_results:
         print(f"{result.creator_id:<9} {money(result.expected_payout):<11} {money(result.amount_paid):<11} {money(result.outstanding_balance):<13} {result.status.value}")
+
+    output = ROOT / "data" / "output"
+    report_paths = {
+        "payout_summary": output / "payout_summary.csv",
+        "reconciliation": output / "reconciliation_report.csv",
+        "exceptions": output / "exceptions.csv",
+    }
+    write_payout_summary(summaries, report_paths["payout_summary"])
+    write_reconciliation_report(initial_results, report_paths["reconciliation"])
+    write_exception_report(validation_issues, payout_results, report_paths["exceptions"])
+    heading("Reports Generated")
+    for path in report_paths.values():
+        print(path.relative_to(ROOT))
 
     selected = next((r for r in initial_results if r.status is ReconciliationStatus.READY_TO_PAY), None)
     selected = selected or next(r for r in initial_results if r.status is ReconciliationStatus.UNDERPAID)
@@ -157,6 +173,7 @@ def run_demo() -> dict[str, object]:
         "duplicate_webhook": duplicate,
         "final_reconciliation": final,
         "provider_payment_count": provider.created_payment_count,
+        "report_paths": report_paths,
     }
 
 

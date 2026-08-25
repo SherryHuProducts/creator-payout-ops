@@ -1,0 +1,4 @@
+source,record_type,record_id,creator_id,status,field,issue_type,message
+VALIDATION,platform_order,ORD-039,CR-F,,order_id,DUPLICATE_ORDER,Duplicate order_id: ORD-039
+PAYOUT,platform_order,ORD-008,CR-H,MISSING_AGREEMENT,,,No active agreement was effective on order_date
+PAYOUT,platform_order,ORD-033,CR-NO-AGREEMENT,MISSING_AGREEMENT,,,No active agreement was effective on order_date
