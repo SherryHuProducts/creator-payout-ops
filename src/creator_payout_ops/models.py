@@ -30,6 +30,7 @@ class PaymentStatus(str, Enum):
 class PaymentExecutionStatus(str, Enum):
     CREATED = "CREATED"
     PENDING = "PENDING"
+    PAID = "PAID"
     FAILED = "FAILED"
 
 
@@ -37,6 +38,17 @@ class PaymentFailureType(str, Enum):
     RETRYABLE = "RETRYABLE"
     NON_RETRYABLE = "NON_RETRYABLE"
     UNKNOWN = "UNKNOWN"
+
+
+class WebhookEventType(str, Enum):
+    PAYMENT_SUCCEEDED = "PAYMENT_SUCCEEDED"
+    PAYMENT_FAILED = "PAYMENT_FAILED"
+
+
+class WebhookProcessingStatus(str, Enum):
+    PROCESSED = "PROCESSED"
+    DUPLICATE = "DUPLICATE"
+    REJECTED = "REJECTED"
 
 
 class ReconciliationStatus(str, Enum):
@@ -162,3 +174,22 @@ class PaymentAttempt:
     failure_type: Optional[PaymentFailureType]
     failure_reason: Optional[str]
     attempt_number: int
+
+
+@dataclass(frozen=True)
+class WebhookEvent:
+    event_id: str
+    event_type: WebhookEventType
+    provider_payment_id: str
+    failure_type: Optional[PaymentFailureType]
+    failure_reason: Optional[str]
+
+
+@dataclass(frozen=True)
+class WebhookProcessingResult:
+    event_id: str
+    provider_payment_id: str
+    processing_status: WebhookProcessingStatus
+    previous_payment_status: Optional[PaymentExecutionStatus]
+    new_payment_status: Optional[PaymentExecutionStatus]
+    message: str
