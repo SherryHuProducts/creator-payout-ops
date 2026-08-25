@@ -27,6 +27,18 @@ class PaymentStatus(str, Enum):
     REFUNDED = "REFUNDED"
 
 
+class PaymentExecutionStatus(str, Enum):
+    CREATED = "CREATED"
+    PENDING = "PENDING"
+    FAILED = "FAILED"
+
+
+class PaymentFailureType(str, Enum):
+    RETRYABLE = "RETRYABLE"
+    NON_RETRYABLE = "NON_RETRYABLE"
+    UNKNOWN = "UNKNOWN"
+
+
 class ReconciliationStatus(str, Enum):
     ELIGIBLE = "ELIGIBLE"
     CANCELLED = "CANCELLED"
@@ -119,3 +131,34 @@ class CreatorReconciliationResult:
     paid_payment_count: int
     pending_payment_count: int
     failed_payment_count: int
+
+
+@dataclass(frozen=True)
+class PaymentRequest:
+    creator_id: str
+    amount: Decimal
+    currency: str
+    idempotency_key: str
+
+
+@dataclass(frozen=True)
+class ProviderPaymentResponse:
+    provider_payment_id: str
+    status: PaymentExecutionStatus
+    idempotency_key: str
+
+
+@dataclass(frozen=True)
+class PaymentAttempt:
+    """One immutable local record of a provider request attempt."""
+
+    internal_payment_id: str
+    creator_id: str
+    amount: Decimal
+    currency: str
+    idempotency_key: str
+    status: PaymentExecutionStatus
+    provider_payment_id: Optional[str]
+    failure_type: Optional[PaymentFailureType]
+    failure_reason: Optional[str]
+    attempt_number: int
