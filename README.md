@@ -111,7 +111,9 @@ Python 3.11+ · Decimal financial arithmetic · CSV · Payment provider simulati
 
 ## Tests
 
-60 automated tests cover data loading and validation, effective-dated payout rules, reconciliation, payment eligibility and idempotency, timeout recovery, webhook state transitions, reporting, and the end-to-end workflow.
+62 automated tests cover data loading and validation, effective-dated payout rules, reconciliation, payment eligibility and idempotency, timeout recovery, webhook state transitions, reporting, and the end-to-end workflow.
+
+GitHub Actions runs the complete pytest suite on every push and pull request using Python 3.12.
 
 ## Roadmap
 
