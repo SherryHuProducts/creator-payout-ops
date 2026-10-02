@@ -3,13 +3,16 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from .models import (
-    CreatorReconciliationResult,
+    ApprovalDecision,
+    ApprovalRecord,
+    ObligationStatus,
     PaymentAttempt,
     PaymentExecutionStatus,
     PaymentFailureType,
     PaymentRequest,
-    ReconciliationStatus,
+    PayoutObligation,
 )
+from .obligations import PAYABLE_RECONCILIATION_STATUSES
 from .payment_provider import (
     NonRetryableProviderError,
     PaymentProvider,
@@ -30,18 +33,11 @@ class PaymentAlreadyPendingError(PaymentExecutionError):
 
 
 def build_idempotency_key(
-    reconciliation_result: CreatorReconciliationResult, currency: str = "USD"
+    obligation: PayoutObligation, currency: str = "USD"
 ) -> str:
     """Build a stable key for one logical creator payout obligation."""
 
-    expected = reconciliation_result.expected_payout.quantize(CENT, rounding=ROUND_HALF_UP)
-    outstanding = reconciliation_result.outstanding_balance.quantize(
-        CENT, rounding=ROUND_HALF_UP
-    )
-    return (
-        f"creator-{reconciliation_result.creator_id}"
-        f"-expected-{expected}-outstanding-{outstanding}-{currency.upper()}"
-    )
+    return f"payout-{obligation.obligation_id}-{currency.upper()}"
 
 
 class PaymentService:
@@ -58,6 +54,8 @@ class PaymentService:
     def _attempt(
         self,
         request: PaymentRequest,
+        obligation_id: str,
+        approval_id: str,
         attempt_number: int,
         status: PaymentExecutionStatus,
         provider_payment_id: str | None = None,
@@ -65,55 +63,84 @@ class PaymentService:
         failure_reason: str | None = None,
     ) -> PaymentAttempt:
         return PaymentAttempt(
-            self._internal_id(), request.creator_id, request.amount, request.currency,
-            request.idempotency_key, status, provider_payment_id, failure_type,
-            failure_reason, attempt_number,
+            internal_payment_id=self._internal_id(),
+            obligation_id=obligation_id,
+            approval_id=approval_id,
+            creator_id=request.creator_id,
+            amount=request.amount,
+            currency=request.currency,
+            idempotency_key=request.idempotency_key,
+            status=status,
+            provider_payment_id=provider_payment_id,
+            failure_type=failure_type,
+            failure_reason=failure_reason,
+            attempt_number=attempt_number,
         )
 
-    def _send(self, request: PaymentRequest, attempt_number: int) -> PaymentAttempt:
+    def _send(
+        self,
+        request: PaymentRequest,
+        obligation_id: str,
+        approval_id: str,
+        attempt_number: int,
+    ) -> PaymentAttempt:
         try:
             response = self.provider.create_payment(request)
             return self._attempt(
-                request, attempt_number, response.status, response.provider_payment_id
+                request, obligation_id, approval_id, attempt_number,
+                response.status, response.provider_payment_id,
             )
         except ProviderTimeoutError as exc:
             # No response does not mean failure. Preserve the logical key so a
             # later retry can recover a provider payment created before timeout.
             return self._attempt(
-                request, attempt_number, PaymentExecutionStatus.CREATED,
+                request, obligation_id, approval_id, attempt_number,
+                PaymentExecutionStatus.CREATED,
                 failure_type=PaymentFailureType.UNKNOWN, failure_reason=str(exc),
             )
         except RetryableProviderError as exc:
             return self._attempt(
-                request, attempt_number, PaymentExecutionStatus.FAILED,
+                request, obligation_id, approval_id, attempt_number,
+                PaymentExecutionStatus.FAILED,
                 failure_type=PaymentFailureType.RETRYABLE, failure_reason=str(exc),
             )
         except NonRetryableProviderError as exc:
             return self._attempt(
-                request, attempt_number, PaymentExecutionStatus.FAILED,
+                request, obligation_id, approval_id, attempt_number,
+                PaymentExecutionStatus.FAILED,
                 failure_type=PaymentFailureType.NON_RETRYABLE, failure_reason=str(exc),
             )
 
     def initiate_payment(
         self,
-        reconciliation_result: CreatorReconciliationResult,
+        obligation: PayoutObligation,
+        approval: ApprovalRecord | None,
         existing_attempts: list[PaymentAttempt],
     ) -> PaymentAttempt:
-        eligible = {
-            ReconciliationStatus.READY_TO_PAY,
-            ReconciliationStatus.UNDERPAID,
-        }
-        if reconciliation_result.status not in eligible:
+        if obligation.status is ObligationStatus.REJECTED:
+            raise PaymentExecutionError("Rejected payout obligation cannot be paid")
+        if obligation.status is not ObligationStatus.APPROVED:
+            raise PaymentExecutionError("Payout obligation is not approved")
+        if approval is None:
+            raise PaymentExecutionError("Matching approval record is required")
+        if not approval.approval_id.strip() or not approval.approved_by.strip():
+            raise PaymentExecutionError("Approval record is incomplete")
+        if approval.obligation_id != obligation.obligation_id:
+            raise PaymentExecutionError("Approval record does not match payout obligation")
+        if approval.decision is not ApprovalDecision.APPROVED:
+            raise PaymentExecutionError("Approval decision does not authorize payment")
+        if obligation.reconciliation_status not in PAYABLE_RECONCILIATION_STATUSES:
             raise PaymentExecutionError(
-                f"Reconciliation status {reconciliation_result.status.value} is not eligible for payment"
+                f"Reconciliation status {obligation.reconciliation_status.value} "
+                "is not eligible for payment"
             )
-        amount = reconciliation_result.outstanding_balance.quantize(
+        amount = obligation.outstanding_amount.quantize(
             CENT, rounding=ROUND_HALF_UP
         )
         if amount <= ZERO:
             raise PaymentExecutionError("Outstanding balance must be greater than zero")
 
-        key = build_idempotency_key(reconciliation_result, self.currency)
+        key = build_idempotency_key(obligation, self.currency)
         if any(
             attempt.idempotency_key == key
             and attempt.status is PaymentExecutionStatus.PENDING
@@ -126,7 +153,9 @@ class PaymentService:
             default=0,
         )
         return self._send(
-            PaymentRequest(reconciliation_result.creator_id, amount, self.currency, key),
+            PaymentRequest(obligation.creator_id, amount, self.currency, key),
+            obligation.obligation_id,
+            approval.approval_id,
             attempt_number,
         )
 
@@ -141,4 +170,9 @@ class PaymentService:
         request = PaymentRequest(
             attempt.creator_id, attempt.amount, attempt.currency, attempt.idempotency_key
         )
-        return self._send(request, attempt.attempt_number + 1)
+        return self._send(
+            request,
+            attempt.obligation_id,
+            attempt.approval_id,
+            attempt.attempt_number + 1,
+        )

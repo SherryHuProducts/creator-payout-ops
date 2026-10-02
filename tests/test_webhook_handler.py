@@ -15,8 +15,9 @@ from creator_payout_ops.webhook_handler import WebhookHandler
 
 def attempt(status=PaymentExecutionStatus.PENDING, failure_type=None, failure_reason=None):
     return PaymentAttempt(
-        "PAY-000001", "C001", Decimal("245.00"), "USD", "key-1", status,
-        "PROV-000001", failure_type, failure_reason, 1,
+        "PAY-000001", "OBL-2026-01-C001", "APR-000001", "C001",
+        Decimal("245.00"), "USD", "key-1", status, "PROV-000001",
+        failure_type, failure_reason, 1,
     )
 
 

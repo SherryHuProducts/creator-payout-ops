@@ -1,7 +1,7 @@
 # Creator Payout Ops — Payment Workflow
 
-**Version:** V1.0  
-**Scope:** Payment execution, transaction state management, idempotency, and retry behavior
+**Version:** V1.1
+**Scope:** Payout obligations, approval, payment execution, transaction state management, idempotency, and retry behavior
 
 ## 1. Purpose
 
@@ -22,6 +22,10 @@ Reconciliation
     ↓
 READY_TO_PAY
     ↓
+Payout Obligation
+    ↓
+Approval Decision
+    ↓
 Payment Service
     ↓
 Payment Provider
@@ -37,14 +41,14 @@ PAID / FAILED
 
 ## 2. Payment Eligibility
 
-A payment may only be initiated when reconciliation determines that money is still owed.
+Reconciliation determines whether money is still owed. It does not authorize payment.
 
 Eligible reconciliation states:
 
 | Reconciliation Status | Payment Action |
 |---|---|
-| `READY_TO_PAY` | Payment may be created |
-| `UNDERPAID` | Outstanding balance may be paid |
+| `READY_TO_PAY` | An outstanding payout obligation may be created |
+| `UNDERPAID` | An obligation may be created for the outstanding balance |
 | `PAID` | No payment |
 | `OVERPAID` | No payment; requires review |
 
@@ -59,6 +63,38 @@ Outstanding Balance:   $200.00
 
 New Payment Amount:    $200.00
 ```
+
+---
+
+## 2A. Payout Obligation and Approval
+
+An eligible reconciliation result creates one payout obligation for a named
+payout cycle. The obligation records the expected payout, amount previously
+paid, outstanding amount, and reconciliation status without recalculating them.
+
+The minimal obligation state model is:
+
+```text
+OUTSTANDING → APPROVED
+            ↘ REJECTED
+```
+
+Valid transitions:
+
+- `OUTSTANDING → APPROVED` with a matching approval record
+- `OUTSTANDING → REJECTED` with a matching rejection record
+
+Invalid transitions:
+
+- `OUTSTANDING → payment` without approval
+- `REJECTED → payment`
+- changing an `APPROVED` or `REJECTED` obligation through a second decision
+- payment with a zero or negative outstanding amount
+- payment when the stored reconciliation status is not `READY_TO_PAY` or `UNDERPAID`
+
+The approval record captures its own ID, the obligation ID, the decision, the
+reviewer, and the decision timestamp. Authentication and role management are
+outside V1.1 scope.
 
 ---
 
@@ -107,13 +143,15 @@ Example:
   "creator_id": "C001",
   "amount": "700.00",
   "currency": "USD",
-  "idempotency_key": "creator-C001-payout-2026-08"
+  "idempotency_key": "payout-OBL-2026-08-C001-USD"
 }
 ```
 
 The system should maintain both:
 
 ```text
+obligation_id
+approval_id
 internal_payment_id
 provider_payment_id
 ```
@@ -156,6 +194,7 @@ The second request must not create another payment.
 An idempotency key must:
 
 - identify one logical payout obligation
+- use `obligation_id` as its stable business identity
 - remain stable across retries
 - not be reused for a different payment
 - be stored with the payment record
@@ -485,7 +524,7 @@ This ensures the system verifies the actual financial outcome rather than assumi
 
 ## 14. Separation of Responsibilities
 
-The system separates four responsibilities:
+The system separates five responsibilities:
 
 ```text
 Payout Engine
@@ -495,6 +534,10 @@ How much should be paid?
 Reconciliation Engine
     ↓
 How much is still owed?
+
+Obligation and Approval
+    ↓
+Has this balance been authorized for disbursement?
 
 Payment Service
     ↓
@@ -514,15 +557,17 @@ This separation prevents provider-specific behavior from becoming coupled to pay
 Creator Payout Ops follows these payment safety principles:
 
 1. Never send money directly from the payout calculation layer.
-2. Never treat `PENDING` as successfully paid.
-3. Never create another payment while an equivalent payment is still pending.
-4. Every payment request must have an idempotency key.
-5. Retries of uncertain requests must reuse the same idempotency key.
-6. A timeout must never be treated as proof of failure.
-7. Confirmed failed attempts must remain in payment history.
-8. Duplicate webhook events must be processed only once.
-9. Only confirmed `PAID` payments count during reconciliation.
-10. Reconciliation must run again after payment completion.
+2. Never treat reconciliation as payment authorization.
+3. Require an approved obligation and matching approval record before execution.
+4. Never treat `PENDING` as successfully paid.
+5. Never create another payment while an equivalent payment is still pending.
+6. Every payment request must have an idempotency key tied to its obligation.
+7. Retries of uncertain requests must reuse the same idempotency key.
+8. A timeout must never be treated as proof of failure.
+9. Confirmed failed attempts must remain in payment history.
+10. Duplicate webhook events must be processed only once.
+11. Only confirmed `PAID` payments count during reconciliation.
+12. Reconciliation must run again after payment completion.
 
 ---
 
@@ -533,6 +578,15 @@ Reconciliation Result
         ↓
 READY_TO_PAY / UNDERPAID
         ↓
+Create OUTSTANDING Obligation
+        ↓
+Approval Decision
+   ┌────┴────┐
+   ↓         ↓
+APPROVED   REJECTED
+   ↓         ↓
+Continue   BLOCK
+   ↓
 Check Existing Pending Payment
         ↓
 ┌───────────────────────┐

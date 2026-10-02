@@ -174,13 +174,15 @@ INVALID_AGREEMENT
 
 ---
 
-## 9. One Payout Obligation per Order
+## 9. One Payout Result per Order
 
-Each eligible platform order may generate only one payout obligation.
+Each eligible platform order may generate only one order-level payout result.
 
 `order_id` acts as the source transaction identifier and must remain unique throughout payout processing.
 
-Payment execution will introduce separate idempotency controls in the payment layer.
+After creator-level aggregation and reconciliation, a separate payout obligation
+may be created for the outstanding balance in a named payout cycle. Payment
+execution uses that obligation as its idempotency identity.
 
 ---
 
@@ -206,23 +208,27 @@ The aggregated expected payout becomes the input to the reconciliation workflow.
 
 ## 11. Separation of Responsibilities
 
-The system separates payout calculation, payment execution, and reconciliation.
+The system separates payout calculation, reconciliation, authorization, and payment execution.
 
 ```text
 Payout Engine
     ↓
 How much SHOULD be paid?
     ↓
-Payment Layer
-    ↓
-Send the payment
-    ↓
 Reconciliation Engine
     ↓
-Was the correct amount actually paid?
+How much is still owed?
+    ↓
+Payout Obligation and Approval
+    ↓
+Has the outstanding balance been authorized?
+    ↓
+Payment Layer
+    ↓
+Initiate and confirm the payment
 ```
 
-The payout engine must not directly execute payments.
+The payout engine and reconciliation engine must not authorize or execute payments.
 
 This separation allows payment providers and payment workflows to change without modifying the core payout calculation rules.
 

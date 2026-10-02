@@ -15,6 +15,10 @@ Validate → Calculate → Reconcile
                          ↓
                    READY_TO_PAY
                          ↓
+                 Payout Obligation
+                         ↓
+                      Approval
+                         ↓
                    Payment Service
                          ↓
                    Mock Provider
@@ -36,12 +40,15 @@ V1 uses entirely synthetic TikTok-style creator-commerce data and an in-memory m
 - Effective-dated creator agreements with overlap and missing-agreement detection
 - `Decimal`-based order payouts with deterministic two-decimal rounding
 - Creator-level expected-versus-paid reconciliation across `READY_TO_PAY`, `PAID`, `UNDERPAID`, and `OVERPAID`
+- Explicit payout obligations and approval records between reconciliation and payment execution
 - Idempotent payment requests, active-pending-payment blocking, and immutable attempt history
 - Timeout-safe recovery using the same logical payment request and idempotency key
 - Webhook-driven `PAID` / `FAILED` confirmation with duplicate-event protection
 - Deterministic payout, reconciliation, and exception CSV reports
 
 ## Payment Safety
+
+**Approval gate:** Reconciliation identifies an outstanding balance but does not authorize payment. The payment service requires an approved obligation and its matching approval record.
 
 **Request idempotency:** Repeating the same logical request returns the existing provider payment instead of creating another payment.
 
@@ -74,6 +81,15 @@ CR-A  Expected $168.00  Paid $168.00  PAID
 CR-B  Expected $144.69  Paid $152.82  OVERPAID
 CR-D  Expected $92.73   Paid $0.00    READY_TO_PAY
 
+Payout Obligation
+OBL-2025-Q3-CR-D  Outstanding $92.73  OUTSTANDING
+
+Approval Gate
+Payment Before Approval: BLOCKED
+
+Approval
+APR-DEMO-0001  OBL-2025-Q3-CR-D  APPROVED
+
 Payment Execution Demo
 CR-D  Amount $92.73  PAY-000001  PROV-000001  PENDING
 
@@ -99,6 +115,7 @@ Reports are regenerated deterministically from synthetic demo data whenever the 
 src/creator_payout_ops/
 ├── payout_engine.py       # Commission calculation
 ├── reconciliation.py      # Expected vs. paid
+├── obligations.py         # Obligation creation & approval
 ├── payment_service.py     # Payment safety & execution
 ├── payment_provider.py    # Mock provider
 ├── webhook_handler.py     # Async confirmation
@@ -111,7 +128,7 @@ Python 3.11+ · Decimal financial arithmetic · CSV · Payment provider simulati
 
 ## Tests
 
-62 automated tests cover data loading and validation, effective-dated payout rules, reconciliation, payment eligibility and idempotency, timeout recovery, webhook state transitions, reporting, and the end-to-end workflow.
+79 automated tests cover data loading and validation, effective-dated payout rules, reconciliation, obligation and approval controls, payment eligibility and idempotency, timeout recovery, webhook state transitions, reporting, and the end-to-end workflow.
 
 GitHub Actions runs the complete pytest suite on every push and pull request using Python 3.12.
 

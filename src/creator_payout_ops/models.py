@@ -7,7 +7,7 @@ must not subtract ``refund_amount`` from it again.
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
@@ -64,6 +64,17 @@ class ReconciliationStatus(str, Enum):
     DUPLICATE_ORDER = "DUPLICATE_ORDER"
     INVALID_RECORD = "INVALID_RECORD"
     INVALID_AGREEMENT = "INVALID_AGREEMENT"
+
+
+class ObligationStatus(str, Enum):
+    OUTSTANDING = "OUTSTANDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class ApprovalDecision(str, Enum):
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
 
 
 @dataclass(frozen=True)
@@ -146,6 +157,31 @@ class CreatorReconciliationResult:
 
 
 @dataclass(frozen=True)
+class PayoutObligation:
+    """One payable creator balance for a named payout cycle."""
+
+    obligation_id: str
+    creator_id: str
+    payout_cycle_id: str
+    expected_payout: Decimal
+    previously_paid_amount: Decimal
+    outstanding_amount: Decimal
+    reconciliation_status: ReconciliationStatus
+    status: ObligationStatus
+
+
+@dataclass(frozen=True)
+class ApprovalRecord:
+    """The explicit authorization decision for one payout obligation."""
+
+    approval_id: str
+    obligation_id: str
+    decision: ApprovalDecision
+    approved_by: str
+    approved_at: datetime
+
+
+@dataclass(frozen=True)
 class PaymentRequest:
     creator_id: str
     amount: Decimal
@@ -165,6 +201,8 @@ class PaymentAttempt:
     """One immutable local record of a provider request attempt."""
 
     internal_payment_id: str
+    obligation_id: str
+    approval_id: str
     creator_id: str
     amount: Decimal
     currency: str

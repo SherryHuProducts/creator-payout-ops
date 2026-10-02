@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections import Counter
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -17,11 +17,17 @@ from creator_payout_ops.loaders import (  # noqa: E402
     load_creator_agreements, load_payment_records, load_platform_orders,
 )
 from creator_payout_ops.models import (  # noqa: E402
-    PaymentRecord, PaymentRequest, PaymentStatus, ReconciliationStatus,
+    ApprovalDecision, PaymentRecord, PaymentRequest, PaymentStatus,
+    ReconciliationStatus,
     WebhookEvent, WebhookEventType,
 )
+from creator_payout_ops.obligations import (  # noqa: E402
+    create_payout_obligation, record_approval_decision,
+)
 from creator_payout_ops.payment_provider import MockPaymentProvider  # noqa: E402
-from creator_payout_ops.payment_service import PaymentService  # noqa: E402
+from creator_payout_ops.payment_service import (  # noqa: E402
+    PaymentExecutionError, PaymentService,
+)
 from creator_payout_ops.payout_engine import aggregate_creator_payouts, calculate_payouts  # noqa: E402
 from creator_payout_ops.reconciliation import reconcile_creator_payout, reconcile_payouts  # noqa: E402
 from creator_payout_ops.reports import (  # noqa: E402
@@ -96,15 +102,45 @@ def run_demo() -> dict[str, object]:
 
     selected = next((r for r in initial_results if r.status is ReconciliationStatus.READY_TO_PAY), None)
     selected = selected or next(r for r in initial_results if r.status is ReconciliationStatus.UNDERPAID)
-    heading("Payment Execution Demo")
+    obligation = create_payout_obligation(selected, "2025-Q3")
+    heading("Payout Obligation")
+    print(f"Obligation ID: {obligation.obligation_id}")
     print(f"Creator: {selected.creator_id}")
-    print(f"Status: {selected.status.value}")
-    print(f"Outstanding Balance: {money(selected.outstanding_balance)}")
+    print(f"Payout Cycle: {obligation.payout_cycle_id}")
+    print(f"Reconciliation Status: {obligation.reconciliation_status.value}")
+    print(f"Outstanding Amount: {money(obligation.outstanding_amount)}")
+    print(f"Obligation Status: {obligation.status.value}")
 
     provider = MockPaymentProvider()
     service = PaymentService(provider)
-    attempts = [service.initiate_payment(selected, [])]
+    heading("Approval Gate")
+    try:
+        service.initiate_payment(obligation, None, [])
+    except PaymentExecutionError as exc:
+        pre_approval_message = str(exc)
+        print(f"Payment Before Approval: BLOCKED — {pre_approval_message}")
+    else:  # pragma: no cover - defensive proof in the visible demo
+        raise AssertionError("Unapproved payout obligation was accepted")
+
+    approved_obligation, approval = record_approval_decision(
+        obligation,
+        approval_id="APR-DEMO-0001",
+        decision=ApprovalDecision.APPROVED,
+        approved_by="demo-finance-reviewer",
+        approved_at=datetime(2025, 9, 30, 12, 0, tzinfo=timezone.utc),
+    )
+    heading("Approval")
+    print(f"Approval ID: {approval.approval_id}")
+    print(f"Obligation ID: {approval.obligation_id}")
+    print(f"Decision: {approval.decision.value}")
+    print(f"Approved By: {approval.approved_by}")
+    print(f"Obligation Status: {approved_obligation.status.value}")
+
+    heading("Payment Execution Demo")
+    attempts = [service.initiate_payment(approved_obligation, approval, [])]
     initiated = attempts[0]
+    print(f"Obligation ID: {initiated.obligation_id}")
+    print(f"Approval ID: {initiated.approval_id}")
     print(f"Internal Payment ID: {initiated.internal_payment_id}")
     print(f"Provider Payment ID: {initiated.provider_payment_id}")
     print(f"Amount: {money(initiated.amount)}")
@@ -159,8 +195,8 @@ def run_demo() -> dict[str, object]:
     heading("End-to-End Workflow Complete")
     for label in (
         "Validation", "Payout Calculation", "Reconciliation", "Payment Execution",
-        "Request Idempotency", "Webhook Confirmation", "Webhook Idempotency",
-        "Final Reconciliation",
+        "Payout Obligation", "Approval Gate", "Request Idempotency",
+        "Webhook Confirmation", "Webhook Idempotency", "Final Reconciliation",
     ):
         print(f"{label:<23} ✓")
     print("\nNo real money was transferred.")
@@ -168,6 +204,10 @@ def run_demo() -> dict[str, object]:
 
     return {
         "selected_reconciliation": selected,
+        "obligation": obligation,
+        "approved_obligation": approved_obligation,
+        "approval": approval,
+        "pre_approval_message": pre_approval_message,
         "initiated_attempt": initiated,
         "confirmed_attempt": confirmed_attempt,
         "duplicate_webhook": duplicate,
