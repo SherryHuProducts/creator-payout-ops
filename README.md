@@ -1,176 +1,276 @@
-# Creator Payout Ops
+# Creator Payout & Reconciliation System
 
-A creator payout and payment integration system that transforms platform earnings into validated creator payouts, reconciles historical payments, safely initiates payment requests, and durably confirms final payment status through webhooks. A thin FastAPI adapter makes the workflow externally demonstrable without duplicating domain logic.
+**A controlled financial workflow for payout calculation → reconciliation → approval → payment → confirmation.**
 
-## Problem
+[![Tests](https://github.com/SherryHuProducts/creator-payout-ops/actions/workflows/tests.yml/badge.svg)](https://github.com/SherryHuProducts/creator-payout-ops/actions/workflows/tests.yml)
 
-Creator agencies may manage earnings, commission agreements, settlements, refunds, and payments across disconnected workflows. Manual payout operations introduce risks including incorrect commission calculations, duplicate or missing payments, uncertain payment states, and reconciliation errors.
+This portfolio case study shows how creator earnings can move from raw transaction data to an approved, traceable, and reconciled payment outcome.
 
-## Workflow
+| In 30 seconds | What this project demonstrates |
+|---|---|
+| **Business problem** | Creator payouts depend on transaction quality, changing agreements, prior payments, and payment-provider outcomes. Manual handling creates risk of incorrect, missing, or duplicate payments. |
+| **Money movement** | Orders are validated, payout rules are applied, outstanding balances are reconciled, obligations are approved, payments are initiated, and webhooks confirm the result. |
+| **Financial controls** | Exact money calculations, reconciliation, explicit approval, payment and webhook idempotency, state-transition rules, SQLite constraints, and final reconciliation. |
+| **What I built** | The payout domain, control workflow, five-endpoint REST API, simulated provider boundary, durable SQLite audit trail, CSV reporting, and automated test suite. |
+| **Scope** | The workflow, API, controls, persistence, and tests are implemented. The payment provider and webhook delivery are simulated; all business data is synthetic. |
 
-```text
-Platform Data
-    ↓
-FastAPI Adapter
-    ↓
-Validate → Calculate → Reconcile
-                         ↓
-                   READY_TO_PAY
-                         ↓
-                 Payout Obligation
-                         ↓
-                      Approval
-                         ↓
-                   Payment Service
-                         ↓
-                   Mock Provider
-                         ↓
-                       PENDING
-                         ↓
-                       Webhook
-                       ↙       ↘
-                    PAID     FAILED
-                     ↓
-              SQLite Audit Trail
-                     ↓
-             Final Reconciliation
-```
+> ▶ **Watch the 3–4 Minute Project Walkthrough** — coming soon
 
-V1 uses entirely synthetic TikTok-style creator-commerce data, a lightweight SQLite lifecycle store, and an in-memory mock payment provider. It does not connect to TikTok or transfer real money.
+## Payout lifecycle
 
-## Key Features
+**Orders → Rules → Reconciliation → Obligation → Approval → Payment → Webhook → Final Reconciliation**
 
-- CSV ingestion and structured validation for synthetic creator-commerce transactions
-- Effective-dated creator agreements with overlap and missing-agreement detection
-- `Decimal`-based order payouts with deterministic two-decimal rounding
-- Creator-level expected-versus-paid reconciliation across `READY_TO_PAY`, `PAID`, `UNDERPAID`, and `OVERPAID`
-- Explicit payout obligations and approval records between reconciliation and payment execution
-- SQLite persistence for obligations, approvals, payment attempts, webhook events, and confirmed payments
-- Five-endpoint FastAPI workflow with interactive OpenAPI documentation
-- Idempotent payment requests, active-pending-payment blocking, and separate attempt history
-- Timeout-safe recovery using the same logical payment request and idempotency key
-- Webhook-driven `PAID` / `FAILED` confirmation with duplicate-event protection
-- Deterministic payout, reconciliation, and exception CSV reports
+1. Validate settled orders and select the effective creator agreement.
+2. Calculate expected payouts with exact decimal arithmetic.
+3. Reconcile expected payouts against completed payment history.
+4. Create an obligation only when an eligible balance remains outstanding.
+5. Require approval before payment execution.
+6. Send an idempotent request to the simulated provider.
+7. Confirm the result through a durable webhook workflow.
+8. Reconcile again using the persisted confirmed payment.
 
-## Payment Safety
+<!-- VISUAL PLACEHOLDER 1: End-to-end payout lifecycle. -->
 
-**Approval gate:** Reconciliation identifies an outstanding balance but does not authorize payment. The payment service requires an approved obligation and its matching approval record.
+## Worked financial example: CR-D
 
-**Request idempotency:** Repeating the same logical request returns the existing provider payment instead of creating another payment.
+The complete system can be understood through one verified payout.
 
-**Pending-payment protection:** A new payment is blocked when an equivalent payment attempt is already `PENDING`.
+### Initial reconciliation
 
-**Timeout-safe retry:** A timeout is treated as an uncertain outcome, not proof of failure. Recovery reuses the original idempotency key.
+| Financial state | Amount / status |
+|---|---:|
+| Expected payout | **$92.73** |
+| Previously paid | **$0.00** |
+| Outstanding | **$92.73** |
+| Reconciliation status | **READY_TO_PAY** |
 
-**Webhook idempotency:** Processed provider event IDs are stored in SQLite, so duplicate events cannot apply a second state change or payment record—even after restart.
+### Controlled execution
 
-**Confirmed-payment boundary:** A successful webhook atomically marks the payment attempt `PAID`, records the webhook, and creates the confirmed `PaymentRecord` consumed by final reconciliation.
+~~~text
+OBL-2025-Q3-CR-D created for $92.73
+        ↓
+Payment before approval: BLOCKED
+        ↓
+APR-DEMO-0001 recorded: APPROVED
+        ↓
+PAY-000001 submitted with obligation-based idempotency
+        ↓
+PROV-000001 returned by the simulated provider
+        ↓
+EVT-DEMO-0001 confirms payment: PENDING → PAID
+        ↓
+Same webhook replayed: DUPLICATE, no second financial effect
+~~~
 
-## Quick Start
+### Final reconciliation
 
-```bash
+| Financial state | Amount / status |
+|---|---:|
+| Expected payout | **$92.73** |
+| Paid | **$92.73** |
+| Outstanding | **$0.00** |
+| Final status | **PAID** |
+
+The primary reconciliation report is regenerated from persisted confirmed payment history, so it reflects the completed financial state rather than stopping at the pre-payment view.
+
+<!-- VISUAL PLACEHOLDER 3: CR-D $92.73 reconciliation before/after. -->
+
+## Financial controls
+
+| Control | Why it exists | How this project implements it |
+|---|---|---|
+| Effective-dated agreements | A creator's payout rate may change over time. | Agreement selection uses each order's date and detects missing or overlapping agreement coverage. |
+| Transaction validation | Bad or duplicate source records can distort payouts. | Structured validators identify duplicate order IDs and invalid order, agreement, and payment data before payout processing. |
+| Reconciliation | A correct calculation does not prove that the correct amount has been paid. | Expected payout is compared with completed payment history to classify balances as ready, paid, underpaid, or overpaid. |
+| Explicit approval gate | An outstanding balance should not authorize its own disbursement. | Reconciliation creates an obligation; a separate approval record is required before the payment service will proceed. |
+| Exact money arithmetic | Binary floating point can introduce financial rounding errors. | Monetary values use Python <code>Decimal</code> with deterministic cent-level rounding. |
+| Payment idempotency | Retries or duplicate submissions must not create duplicate effective payments. | The stable identity <code>payout-{obligation_id}-{currency}</code> is persisted and protected by application checks and SQLite constraints. |
+| Webhook idempotency | Providers may deliver the same event more than once. | Processed event IDs are persisted; replay returns <code>DUPLICATE</code> without another transition, payment record, or paid amount. |
+| State-transition controls | Out-of-order events can corrupt financial status. | Only defined obligation and payment transitions are accepted; invalid transitions are rejected. |
+| Durable audit trail | Finance and operations teams need evidence linking authorization to outcome. | SQLite relates the obligation, approval, attempts, provider reference, webhook event, and confirmed payment. |
+| Final reconciliation | Initiating a payment is not proof of settlement. | Only webhook-confirmed <code>PAID</code> records count as paid, and reconciliation runs again after confirmation. |
+
+These controls demonstrate system-enforced workflow separation. The project does **not** claim authenticated human segregation of duties, RBAC, or production payment-provider controls.
+
+## Architecture
+
+~~~text
+FastAPI / HTTP
+      ↓
+Application orchestration
+      ↓
+Existing domain services
+      ├── Calculation, reconciliation, approval, payment rules
+      ├── SQLite lifecycle repository (real, durable)
+      └── Mock payment provider (simulated external boundary)
+                    ↓
+          Simulated provider webhook
+                    ↓
+       Durable confirmation + final reconciliation
+~~~
+
+The API translates HTTP requests and domain failures. Business rules remain in the tested domain services, and SQLite supplies persistence and financial traceability without an ORM.
+
+### Implementation boundaries
+
+| Boundary | Status |
+|---|---|
+| REST API and OpenAPI contract | **Implemented** |
+| Calculation, reconciliation, approval, and payment rules | **Implemented** |
+| SQLite persistence and database constraints | **Implemented** |
+| Payment and webhook idempotency | **Implemented** |
+| Automated tests and GitHub Actions CI | **Implemented** |
+| External payment provider | **Simulated** |
+| Provider webhook delivery | **Simulated** |
+| Creator, order, agreement, and historical payment data | **Synthetic** |
+
+## Portfolio API
+
+The FastAPI adapter exposes only the five operations needed to demonstrate the financial lifecycle.
+
+| Endpoint | Business purpose |
+|---|---|
+| <code>POST /payout-cycles/reconcile</code> | Calculate and reconcile the selected creator's synthetic payout, then persist an eligible obligation. |
+| <code>POST /obligations/{id}/approve</code> | Record authorization for an outstanding obligation. |
+| <code>POST /obligations/{id}/payments</code> | Initiate the approved payout through the existing idempotent payment service. |
+| <code>POST /webhooks/payments</code> | Deliver a simulated provider result through the durable webhook workflow. |
+| <code>GET /obligations/{id}</code> | Review obligation, approval, payment, confirmation, final reconciliation, and audit counts. |
+
+Swagger UI is available at <code>/docs</code>. Detailed request examples are in [the API walkthrough](docs/api_workflow.md).
+
+## Payment safety and idempotency
+
+### What happens if the payment request is submitted twice?
+
+The payment identity is based on the obligation, not on an individual HTTP request:
+
+~~~text
+payout-OBL-2025-Q3-CR-D-USD
+~~~
+
+Before contacting the provider, the payment service loads persisted attempts. If the same identity is already <code>PENDING</code> or <code>PAID</code>, another effective payment is blocked. SQLite also enforces one effective <code>PENDING</code> or <code>PAID</code> attempt for that identity.
+
+The mock provider separately returns the same simulated provider payment for a repeated request using the same key and parameters. In a real integration, provider-side guarantees would depend on the selected provider honoring the submitted idempotency key.
+
+### What happens if the webhook is delivered twice?
+
+The first valid success event atomically:
+
+1. changes the attempt from <code>PENDING</code> to <code>PAID</code>;
+2. stores the processed event ID; and
+3. creates the confirmed payment record.
+
+The same event after restart returns <code>DUPLICATE</code>. It does not create another payment record or increase the paid amount again.
+
+<!-- VISUAL PLACEHOLDER 2: Payment state + idempotency model. -->
+
+## Audit trail
+
+For one payout obligation, the system can reconstruct:
+
+**Obligation → Approval → Payment Attempt → Provider Reference → Webhook Event → Confirmed Payment → Final Reconciliation**
+
+This matters because finance and operations reviewers need to answer more than “was a request sent?” They need to trace why money was owed, who or what authorized the workflow, which provider reference was involved, which event confirmed the outcome, and whether the final ledger view reconciles.
+
+## Tests and CI
+
+**Verified result: 99 tests passing.**
+
+The suite covers:
+
+- payout rules, agreement selection, validation, and reconciliation;
+- obligation creation and approval controls;
+- payment eligibility, retry identity, and duplicate prevention;
+- durable SQLite persistence and database integrity;
+- webhook transitions, restart-safe replay protection, and confirmed payments;
+- final reconciliation and reports; and
+- the five-endpoint HTTP workflow and error mapping.
+
+GitHub Actions installs the pinned application dependencies and runs the complete pytest suite on every push and pull request.
+
+## Real, simulated, and synthetic
+
+| Category | Included |
+|---|---|
+| **Real implementation** | FastAPI HTTP layer, financial workflow and domain logic, approval control, reconciliation, SQLite persistence, idempotency mechanisms, CSV reporting, automated tests, and CI. |
+| **Simulated boundary** | External payment provider behavior and provider webhook delivery. |
+| **Synthetic inputs** | Creator, order, agreement, and historical payment data. |
+| **Not implemented** | Real money movement, authentication, RBAC, webhook signatures, production provider integration, and production concurrency hardening. |
+
+No proprietary business, creator, customer, banking, or payment data is included. The project is independent and is not affiliated with TikTok, YouTube, Stripe, Checkout.com, or another payment provider.
+
+## Design decisions
+
+- **<code>Decimal</code> instead of <code>float</code>:** keeps financial arithmetic exact and rounding explicit.
+- **Approval separate from reconciliation:** distinguishes “money is outstanding” from “payment is authorized.”
+- **Obligation-based payment identity:** gives retries a stable business key across application restarts.
+- **Webhook confirmation before completion:** a submitted or pending request is never counted as paid.
+- **SQLite for portfolio-scale durability:** provides inspectable constraints and auditability without turning the project into a database-platform exercise.
+
+## Project structure
+
+~~~text
+src/creator_payout_ops/
+├── api/
+│   ├── app.py                  # FastAPI routes and HTTP error mapping
+│   ├── application.py          # HTTP-to-domain orchestration
+│   └── schemas.py              # Request and response contracts
+├── payout_engine.py            # Commission calculation
+├── reconciliation.py           # Expected-versus-paid logic
+├── obligations.py              # Obligation creation and approval
+├── payment_service.py          # Approval gate and payment idempotency
+├── payment_provider.py         # Simulated external provider
+├── webhook_handler.py          # Payment confirmation workflow
+├── repositories/
+│   └── sqlite.py               # Durable lifecycle and audit trail
+└── reports.py                  # Finance-facing CSV outputs
+~~~
+
+## Run locally
+
+Requires Python 3.11 or newer.
+
+~~~bash
 git clone https://github.com/SherryHuProducts/creator-payout-ops.git
 cd creator-payout-ops
 python3 -m pip install -r requirements.txt
+~~~
+
+Run the deterministic CLI case study:
+
+~~~bash
 python3 run_reconciliation.py
-```
-
-Run the tests:
-
-```bash
-PYTHONPATH=src python3 -m pytest
-```
+~~~
 
 Start the API:
 
-```bash
+~~~bash
 PYTHONPATH=src python3 -m uvicorn creator_payout_ops.api.main:app --reload
-```
+~~~
 
-Open Swagger UI at `http://127.0.0.1:8000/docs`. The walkthrough uses five endpoints:
+Then open <code>http://127.0.0.1:8000/docs</code>.
 
-1. `POST /payout-cycles/reconcile`
-2. `POST /obligations/{obligation_id}/approve`
-3. `POST /obligations/{obligation_id}/payments`
-4. `POST /webhooks/payments`
-5. `GET /obligations/{obligation_id}`
+Run all tests:
 
-The HTTP API and SQLite lifecycle are real. The external payment provider and webhook payload are intentionally simulated. See [`docs/api_workflow.md`](docs/api_workflow.md) for the request sequence.
+~~~bash
+PYTHONPATH=src python3 -m pytest
+~~~
 
-## Example Output
+## Documentation
 
-```text
-Initial Reconciliation
-CR-A  Expected $168.00  Paid $168.00  PAID
-CR-B  Expected $144.69  Paid $152.82  OVERPAID
-CR-D  Expected $92.73   Paid $0.00    READY_TO_PAY
+- [API walkthrough](docs/api_workflow.md)
+- [Payment workflow and controls](docs/payment_workflow.md)
+- [Payout business rules](docs/payout_business_rules.md)
+- [Backend architecture](docs/V1_1_BACKEND_ARCHITECTURE.md)
 
-Payout Obligation
-OBL-2025-Q3-CR-D  Outstanding $92.73  OUTSTANDING
+## Limitations and scope
 
-Approval Gate
-Payment Before Approval: BLOCKED
+Creator Payout Portfolio V1.1 is a controlled, portfolio-scale financial workflow—not a production payment platform.
 
-Approval
-APR-DEMO-0001  OBL-2025-Q3-CR-D  APPROVED
+- The API currently operates on the bundled synthetic dataset.
+- The external provider and webhook delivery are simulations.
+- Approval captures a reviewer identifier but does not authenticate a human user.
+- Webhook signatures, secrets, authentication, RBAC, production concurrency controls, deployment infrastructure, and real payment credentials are intentionally out of scope.
+- The synthetic CLI and API SQLite files are suitable for demonstration and audit inspection, not production transaction processing.
 
-Payment Execution Demo
-CR-D  Amount $92.73  PAY-000001  PROV-000001  PENDING
-
-Webhook Confirmation
-EVT-DEMO-0001  PENDING → PAID  PROCESSED
-Webhook and confirmed payment persisted
-
-Duplicate Webhook After Restart
-EVT-DEMO-0001  DUPLICATE  Confirmed payment records: 1
-
-Final Reconciliation
-CR-D  Total Paid $92.73  Outstanding $0.00  PAID
-```
-
-## Reports
-
-- `data/output/payout_summary.csv` — eligible order counts and expected payout by creator
-- `data/output/reconciliation_report.csv` — final expected-versus-paid amounts and reconciliation status, including persisted confirmed payments
-- `data/output/exceptions.csv` — validation and payout-processing exceptions requiring review
-
-Reports are regenerated deterministically from synthetic demo data whenever the end-to-end demo runs. The synthetic demo SQLite file is also rebuilt on each run and remains available afterward for audit review.
-
-## Project Structure
-
-```text
-src/creator_payout_ops/
-├── api/                   # FastAPI adapter & HTTP contracts
-├── payout_engine.py       # Commission calculation
-├── reconciliation.py      # Expected vs. paid
-├── obligations.py         # Obligation creation & approval
-├── payment_service.py     # Payment safety & execution
-├── payment_provider.py    # Mock provider
-├── webhook_handler.py     # Async confirmation
-├── repositories/sqlite.py # Durable lifecycle & audit trail
-└── reports.py             # Operational reports
-```
-
-## Tech
-
-Python 3.11+ · FastAPI · OpenAPI · SQLite · Decimal financial arithmetic · CSV · Payment provider simulation · Pytest
-
-## Tests
-
-99 automated tests cover HTTP integration, data loading and validation, effective-dated payout rules, reconciliation, obligation and approval controls, durable payment and webhook idempotency, SQLite integrity, audit reconstruction, reporting, and the end-to-end workflow.
-
-GitHub Actions runs the complete pytest suite on every push and pull request using Python 3.12.
-
-## Roadmap
-
-**V1 — Creator Payout & Payment Integration:** Complete
-
-**V2 — Multi-Tenant Agency SaaS:** PostgreSQL persistence, authentication, configurable workflows, and operations dashboard.
-
-**V3 — Multi-Platform Creator Finance:** Cross-platform earnings adapters and centralized payout operations.
-
-## Data & Disclaimer
-
-All demo data is synthetic. No proprietary company, creator, customer, banking, or payment data is included.
-
-This project is independent and is not affiliated with TikTok, YouTube, Checkout.com, Stripe, or any payment provider.
+Application functionality is feature frozen for Portfolio V1.1 unless a verified defect prevents the demonstration.
