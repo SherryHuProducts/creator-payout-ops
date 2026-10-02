@@ -1,7 +1,7 @@
 # Creator Payout Ops — Payment Workflow
 
 **Version:** V1.1
-**Scope:** Payout obligations, approval, payment execution, transaction state management, idempotency, and retry behavior
+**Scope:** Payout obligations, approval, payment execution, durable transaction state, idempotency, confirmation, and reconciliation
 
 ## 1. Purpose
 
@@ -34,7 +34,14 @@ PENDING
     ↓
 Webhook Confirmation
     ↓
-PAID / FAILED
+┌─────────┐
+↓         ↓
+PAID    FAILED
+ ↓        ↓
+Confirmed Retry / Review
+Payment
+ ↓
+Final Reconciliation
 ```
 
 ---
@@ -200,6 +207,11 @@ An idempotency key must:
 - be stored with the payment record
 
 A retry of the same payment must reuse the original idempotency key.
+
+SQLite stores each attempt's idempotency key and enforces one effective
+`PENDING` or `PAID` attempt for that identity. The payment service loads prior
+attempts from the repository before contacting the provider, so this check
+survives application restart.
 
 ---
 
@@ -420,6 +432,41 @@ PAY-002
 PAID
 ```
 
+---
+
+## 10A. Durable Confirmation and Audit Trail
+
+SQLite persists the minimum records needed to reconstruct the financial
+lifecycle:
+
+- payout obligation
+- approval decision
+- payment attempt and provider reference
+- processed webhook event
+- confirmed payment record
+
+A valid `PAYMENT_SUCCEEDED` webhook is handled as one database transaction:
+
+```text
+PENDING PaymentAttempt
+    → PAID PaymentAttempt
+    → processed WebhookEvent
+    → confirmed PaymentRecord
+```
+
+If any write fails, the transaction is rolled back. The webhook event ID,
+provider payment ID, source payment attempt, obligation, and confirmed payment
+are protected by uniqueness and relationship constraints. Replaying a stored
+event after restart returns `DUPLICATE` and does not create another payment
+record or paid amount.
+
+Final reconciliation reads the confirmed `PaymentRecord` from SQLite and the
+primary reconciliation CSV is regenerated from that durable payment history.
+
+The payment provider remains an in-memory simulation. SQLite preserves the
+application's financial workflow and audit evidence; it does not represent a
+real provider integration or transfer real money.
+
 Payment attempts must remain separate records so the complete transaction history can be audited.
 
 ---
@@ -609,7 +656,10 @@ Check Existing Pending Payment
         ↓        ↓
       PAID     FAILED
         ↓        ↓
- Reconcile   Retry / Review
+ Confirmed  Retry / Review
+ Payment
+    ↓
+ Reconcile
 ```
 
 ---
@@ -629,6 +679,7 @@ The implementation should demonstrate:
 - retry behavior
 - webhook-driven confirmation
 - duplicate webhook protection
+- durable lifecycle audit trail
 - post-payment reconciliation
 
 Real payment credentials, bank accounts, creator financial information, and production payment-provider integrations are outside V1 scope.

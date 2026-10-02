@@ -23,7 +23,7 @@ def _writer(output_path: Path | str, fieldnames: list[str]):
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("w", newline="", encoding="utf-8")
-    writer = csv.DictWriter(handle, fieldnames=fieldnames)
+    writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     return handle, writer
 

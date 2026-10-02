@@ -37,6 +37,11 @@ venv.bak/
 htmlcov/
 coverage.xml
 
+# Local SQLite lifecycle stores
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
 # Type checker and linter caches
 .mypy_cache/
 .ruff_cache/

@@ -1,6 +1,6 @@
 # Creator Payout Ops
 
-A creator payout and payment integration system that transforms platform earnings into validated creator payouts, reconciles historical payments, safely initiates payment requests, and confirms final payment status through webhooks.
+A creator payout and payment integration system that transforms platform earnings into validated creator payouts, reconciles historical payments, safely initiates payment requests, and durably confirms final payment status through webhooks.
 
 ## Problem
 
@@ -29,10 +29,12 @@ Validate → Calculate → Reconcile
                        ↙       ↘
                     PAID     FAILED
                      ↓
+              SQLite Audit Trail
+                     ↓
              Final Reconciliation
 ```
 
-V1 uses entirely synthetic TikTok-style creator-commerce data and an in-memory mock payment provider. It does not connect to TikTok or transfer real money.
+V1 uses entirely synthetic TikTok-style creator-commerce data, a lightweight SQLite lifecycle store, and an in-memory mock payment provider. It does not connect to TikTok or transfer real money.
 
 ## Key Features
 
@@ -41,7 +43,8 @@ V1 uses entirely synthetic TikTok-style creator-commerce data and an in-memory m
 - `Decimal`-based order payouts with deterministic two-decimal rounding
 - Creator-level expected-versus-paid reconciliation across `READY_TO_PAY`, `PAID`, `UNDERPAID`, and `OVERPAID`
 - Explicit payout obligations and approval records between reconciliation and payment execution
-- Idempotent payment requests, active-pending-payment blocking, and immutable attempt history
+- SQLite persistence for obligations, approvals, payment attempts, webhook events, and confirmed payments
+- Idempotent payment requests, active-pending-payment blocking, and separate attempt history
 - Timeout-safe recovery using the same logical payment request and idempotency key
 - Webhook-driven `PAID` / `FAILED` confirmation with duplicate-event protection
 - Deterministic payout, reconciliation, and exception CSV reports
@@ -56,7 +59,9 @@ V1 uses entirely synthetic TikTok-style creator-commerce data and an in-memory m
 
 **Timeout-safe retry:** A timeout is treated as an uncertain outcome, not proof of failure. Recovery reuses the original idempotency key.
 
-**Webhook idempotency:** Provider event IDs are recorded after successful processing so duplicate events cannot apply a second state change.
+**Webhook idempotency:** Processed provider event IDs are stored in SQLite, so duplicate events cannot apply a second state change or payment record—even after restart.
+
+**Confirmed-payment boundary:** A successful webhook atomically marks the payment attempt `PAID`, records the webhook, and creates the confirmed `PaymentRecord` consumed by final reconciliation.
 
 ## Quick Start
 
@@ -95,7 +100,10 @@ CR-D  Amount $92.73  PAY-000001  PROV-000001  PENDING
 
 Webhook Confirmation
 EVT-DEMO-0001  PENDING → PAID  PROCESSED
-Duplicate replay: DUPLICATE; payment state changed: NO
+Webhook and confirmed payment persisted
+
+Duplicate Webhook After Restart
+EVT-DEMO-0001  DUPLICATE  Confirmed payment records: 1
 
 Final Reconciliation
 CR-D  Total Paid $92.73  Outstanding $0.00  PAID
@@ -104,10 +112,10 @@ CR-D  Total Paid $92.73  Outstanding $0.00  PAID
 ## Reports
 
 - `data/output/payout_summary.csv` — eligible order counts and expected payout by creator
-- `data/output/reconciliation_report.csv` — initial expected-versus-paid amounts and reconciliation status
+- `data/output/reconciliation_report.csv` — final expected-versus-paid amounts and reconciliation status, including persisted confirmed payments
 - `data/output/exceptions.csv` — validation and payout-processing exceptions requiring review
 
-Reports are regenerated deterministically from synthetic demo data whenever the end-to-end demo runs.
+Reports are regenerated deterministically from synthetic demo data whenever the end-to-end demo runs. The synthetic demo SQLite file is also rebuilt on each run and remains available afterward for audit review.
 
 ## Project Structure
 
@@ -119,16 +127,17 @@ src/creator_payout_ops/
 ├── payment_service.py     # Payment safety & execution
 ├── payment_provider.py    # Mock provider
 ├── webhook_handler.py     # Async confirmation
+├── repositories/sqlite.py # Durable lifecycle & audit trail
 └── reports.py             # Operational reports
 ```
 
 ## Tech
 
-Python 3.11+ · Decimal financial arithmetic · CSV · Payment provider simulation · Webhooks · Pytest
+Python 3.11+ · SQLite · Decimal financial arithmetic · CSV · Payment provider simulation · Webhooks · Pytest
 
 ## Tests
 
-79 automated tests cover data loading and validation, effective-dated payout rules, reconciliation, obligation and approval controls, payment eligibility and idempotency, timeout recovery, webhook state transitions, reporting, and the end-to-end workflow.
+89 automated tests cover data loading and validation, effective-dated payout rules, reconciliation, obligation and approval controls, durable payment and webhook idempotency, SQLite integrity, audit reconstruction, reporting, and the end-to-end workflow.
 
 GitHub Actions runs the complete pytest suite on every push and pull request using Python 3.12.
 

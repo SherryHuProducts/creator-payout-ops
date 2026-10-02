@@ -19,6 +19,7 @@ from .payment_provider import (
     ProviderTimeoutError,
     RetryableProviderError,
 )
+from .repositories.interfaces import PaymentRepository
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
@@ -32,6 +33,10 @@ class PaymentAlreadyPendingError(PaymentExecutionError):
     code = "PAYMENT_ALREADY_PENDING"
 
 
+class PaymentAlreadyCompletedError(PaymentExecutionError):
+    code = "PAYMENT_ALREADY_COMPLETED"
+
+
 def build_idempotency_key(
     obligation: PayoutObligation, currency: str = "USD"
 ) -> str:
@@ -41,10 +46,20 @@ def build_idempotency_key(
 
 
 class PaymentService:
-    def __init__(self, provider: PaymentProvider, currency: str = "USD") -> None:
+    def __init__(
+        self,
+        provider: PaymentProvider,
+        currency: str = "USD",
+        payment_repository: PaymentRepository | None = None,
+    ) -> None:
         self.provider = provider
         self.currency = currency.upper()
-        self._next_internal_id = 1
+        self.payment_repository = payment_repository
+        self._next_internal_id = (
+            payment_repository.next_internal_payment_sequence()
+            if payment_repository
+            else 1
+        )
 
     def _internal_id(self) -> str:
         identifier = f"PAY-{self._next_internal_id:06d}"
@@ -115,7 +130,7 @@ class PaymentService:
         self,
         obligation: PayoutObligation,
         approval: ApprovalRecord | None,
-        existing_attempts: list[PaymentAttempt],
+        existing_attempts: list[PaymentAttempt] | None = None,
     ) -> PaymentAttempt:
         if obligation.status is ObligationStatus.REJECTED:
             raise PaymentExecutionError("Rejected payout obligation cannot be paid")
@@ -140,24 +155,43 @@ class PaymentService:
         if amount <= ZERO:
             raise PaymentExecutionError("Outstanding balance must be greater than zero")
 
+        persisted_attempts = (
+            self.payment_repository.list_attempts(obligation.creator_id)
+            if self.payment_repository
+            else []
+        )
+        attempts_by_id = {
+            attempt.internal_payment_id: attempt
+            for attempt in [*persisted_attempts, *(existing_attempts or [])]
+        }
+        attempts = list(attempts_by_id.values())
         key = build_idempotency_key(obligation, self.currency)
         if any(
             attempt.idempotency_key == key
             and attempt.status is PaymentExecutionStatus.PENDING
-            for attempt in existing_attempts
+            for attempt in attempts
         ):
             raise PaymentAlreadyPendingError("PAYMENT_ALREADY_PENDING")
+        if any(
+            attempt.idempotency_key == key
+            and attempt.status is PaymentExecutionStatus.PAID
+            for attempt in attempts
+        ):
+            raise PaymentAlreadyCompletedError("PAYMENT_ALREADY_COMPLETED")
 
         attempt_number = 1 + max(
-            (attempt.attempt_number for attempt in existing_attempts if attempt.idempotency_key == key),
+            (attempt.attempt_number for attempt in attempts if attempt.idempotency_key == key),
             default=0,
         )
-        return self._send(
+        attempt = self._send(
             PaymentRequest(obligation.creator_id, amount, self.currency, key),
             obligation.obligation_id,
             approval.approval_id,
             attempt_number,
         )
+        if self.payment_repository:
+            self.payment_repository.save_attempt(attempt)
+        return attempt
 
     def retry_uncertain_payment(self, attempt: PaymentAttempt) -> PaymentAttempt:
         """Retry an uncertain request without changing its logical identity."""
@@ -170,9 +204,12 @@ class PaymentService:
         request = PaymentRequest(
             attempt.creator_id, attempt.amount, attempt.currency, attempt.idempotency_key
         )
-        return self._send(
+        retried = self._send(
             request,
             attempt.obligation_id,
             attempt.approval_id,
             attempt.attempt_number + 1,
         )
+        if self.payment_repository:
+            self.payment_repository.save_attempt(retried)
+        return retried

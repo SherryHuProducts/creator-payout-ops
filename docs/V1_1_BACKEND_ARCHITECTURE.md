@@ -1,33 +1,39 @@
-# V1.1 Backend Architecture Preparation
+# V1.1 Backend Architecture
 
-V1.1 introduces architectural boundaries around the working V1 domain. It
-does not change payout, reconciliation, payment, idempotency, webhook,
-reporting, or end-to-end behavior.
+V1.1 introduces architectural boundaries and lightweight durable persistence
+around the working V1 domain. Payout calculation remains unchanged; SQLite
+closes the audit loop from obligation through confirmed payment and final
+reconciliation.
 
-## Planned request flow
+## Current workflow boundary
 
 ```text
-Client
-  -> FastAPI (planned)
-  -> Application Services
+CLI Demo
   -> Domain Logic
-  -> Repository Layer
-  -> PostgreSQL (planned)
+  -> Repository Protocols
+  -> sqlite3 Lifecycle Adapter
+  -> Final Reconciliation / CSV Report
 ```
 
-Application services coordinate use cases and delegate all business decisions
-to the existing domain modules. Repository protocols define persistence ports
-using existing domain models; database adapters are not implemented yet.
+Domain services retain calculation, obligation, approval, payment, and webhook
+rules. Repository protocols define persistence ports using the existing domain
+models. `SQLiteLifecycleRepository` implements the obligation, approval,
+payment, webhook, and audit-trail boundaries without an ORM.
+
+SQLite persists payout obligations, approval records, payment attempts,
+processed webhook events, and confirmed payment records. The mock payment
+provider remains in memory and no real payment service is connected.
 
 ## Planned infrastructure
 
 ```text
 Docker (planned)
-  -> GitHub Actions (planned)
+  -> GitHub Actions (test workflow implemented)
   -> AWS ECS Fargate (planned)
   -> RDS PostgreSQL (planned)
   -> CloudWatch (planned)
 ```
 
-FastAPI, SQLAlchemy, Alembic, PostgreSQL, containerization, CI/CD, AWS
-deployment, and structured observability remain future milestones.
+FastAPI, SQLAlchemy, Alembic, PostgreSQL, containerization, AWS deployment, and
+structured observability remain future milestones. GitHub Actions currently
+runs the complete pytest suite; it does not deploy the application.

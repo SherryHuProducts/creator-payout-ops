@@ -231,3 +231,14 @@ class WebhookProcessingResult:
     previous_payment_status: Optional[PaymentExecutionStatus]
     new_payment_status: Optional[PaymentExecutionStatus]
     message: str
+
+
+@dataclass(frozen=True)
+class PayoutAuditTrail:
+    """Durable records that explain one payout obligation end to end."""
+
+    obligation: PayoutObligation
+    approval: Optional[ApprovalRecord]
+    payment_attempts: tuple[PaymentAttempt, ...]
+    webhook_events: tuple[WebhookEvent, ...]
+    confirmed_payments: tuple[PaymentRecord, ...]
