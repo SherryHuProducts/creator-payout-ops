@@ -1,6 +1,6 @@
 # Creator Payout Ops
 
-A creator payout and payment integration system that transforms platform earnings into validated creator payouts, reconciles historical payments, safely initiates payment requests, and durably confirms final payment status through webhooks.
+A creator payout and payment integration system that transforms platform earnings into validated creator payouts, reconciles historical payments, safely initiates payment requests, and durably confirms final payment status through webhooks. A thin FastAPI adapter makes the workflow externally demonstrable without duplicating domain logic.
 
 ## Problem
 
@@ -10,6 +10,8 @@ Creator agencies may manage earnings, commission agreements, settlements, refund
 
 ```text
 Platform Data
+    ↓
+FastAPI Adapter
     ↓
 Validate → Calculate → Reconcile
                          ↓
@@ -44,6 +46,7 @@ V1 uses entirely synthetic TikTok-style creator-commerce data, a lightweight SQL
 - Creator-level expected-versus-paid reconciliation across `READY_TO_PAY`, `PAID`, `UNDERPAID`, and `OVERPAID`
 - Explicit payout obligations and approval records between reconciliation and payment execution
 - SQLite persistence for obligations, approvals, payment attempts, webhook events, and confirmed payments
+- Five-endpoint FastAPI workflow with interactive OpenAPI documentation
 - Idempotent payment requests, active-pending-payment blocking, and separate attempt history
 - Timeout-safe recovery using the same logical payment request and idempotency key
 - Webhook-driven `PAID` / `FAILED` confirmation with duplicate-event protection
@@ -77,6 +80,22 @@ Run the tests:
 ```bash
 PYTHONPATH=src python3 -m pytest
 ```
+
+Start the API:
+
+```bash
+PYTHONPATH=src python3 -m uvicorn creator_payout_ops.api.main:app --reload
+```
+
+Open Swagger UI at `http://127.0.0.1:8000/docs`. The walkthrough uses five endpoints:
+
+1. `POST /payout-cycles/reconcile`
+2. `POST /obligations/{obligation_id}/approve`
+3. `POST /obligations/{obligation_id}/payments`
+4. `POST /webhooks/payments`
+5. `GET /obligations/{obligation_id}`
+
+The HTTP API and SQLite lifecycle are real. The external payment provider and webhook payload are intentionally simulated. See [`docs/api_workflow.md`](docs/api_workflow.md) for the request sequence.
 
 ## Example Output
 
@@ -121,6 +140,7 @@ Reports are regenerated deterministically from synthetic demo data whenever the 
 
 ```text
 src/creator_payout_ops/
+├── api/                   # FastAPI adapter & HTTP contracts
 ├── payout_engine.py       # Commission calculation
 ├── reconciliation.py      # Expected vs. paid
 ├── obligations.py         # Obligation creation & approval
@@ -133,11 +153,11 @@ src/creator_payout_ops/
 
 ## Tech
 
-Python 3.11+ · SQLite · Decimal financial arithmetic · CSV · Payment provider simulation · Webhooks · Pytest
+Python 3.11+ · FastAPI · OpenAPI · SQLite · Decimal financial arithmetic · CSV · Payment provider simulation · Pytest
 
 ## Tests
 
-89 automated tests cover data loading and validation, effective-dated payout rules, reconciliation, obligation and approval controls, durable payment and webhook idempotency, SQLite integrity, audit reconstruction, reporting, and the end-to-end workflow.
+99 automated tests cover HTTP integration, data loading and validation, effective-dated payout rules, reconciliation, obligation and approval controls, durable payment and webhook idempotency, SQLite integrity, audit reconstruction, reporting, and the end-to-end workflow.
 
 GitHub Actions runs the complete pytest suite on every push and pull request using Python 3.12.
 

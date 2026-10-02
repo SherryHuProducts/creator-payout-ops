@@ -1,1 +1,4 @@
+fastapi==0.142.2
+httpx2==2.13.1
 pytest
+uvicorn==0.54.0

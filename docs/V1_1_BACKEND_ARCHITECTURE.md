@@ -8,17 +8,20 @@ reconciliation.
 ## Current workflow boundary
 
 ```text
-CLI Demo
+HTTP / Swagger -> FastAPI Adapter ─┐
+CLI Demo ──────────────────────────┴→ Application Orchestration
   -> Domain Logic
   -> Repository Protocols
   -> sqlite3 Lifecycle Adapter
   -> Final Reconciliation / CSV Report
 ```
 
-Domain services retain calculation, obligation, approval, payment, and webhook
-rules. Repository protocols define persistence ports using the existing domain
-models. `SQLiteLifecycleRepository` implements the obligation, approval,
-payment, webhook, and audit-trail boundaries without an ORM.
+FastAPI provides five business workflow endpoints and maps HTTP requests,
+responses, and errors. Domain services retain calculation, obligation,
+approval, payment, and webhook rules. Repository protocols define persistence
+ports using the existing domain models. `SQLiteLifecycleRepository` implements
+the obligation, approval, payment, webhook, and audit-trail boundaries without
+an ORM.
 
 SQLite persists payout obligations, approval records, payment attempts,
 processed webhook events, and confirmed payment records. The mock payment
@@ -34,6 +37,6 @@ Docker (planned)
   -> CloudWatch (planned)
 ```
 
-FastAPI, SQLAlchemy, Alembic, PostgreSQL, containerization, AWS deployment, and
+SQLAlchemy, Alembic, PostgreSQL, containerization, AWS deployment, and
 structured observability remain future milestones. GitHub Actions currently
 runs the complete pytest suite; it does not deploy the application.
